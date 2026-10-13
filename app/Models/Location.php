@@ -46,4 +46,9 @@ class Location extends Model
     {
         return $this->hasMany(Location::class, 'parent_id');
     }
+
+    public function territorialZones(): HasMany
+    {
+        return $this->hasMany(TerritorialZone::class);
+    }
 }

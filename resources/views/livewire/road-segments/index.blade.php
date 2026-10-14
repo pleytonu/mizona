@@ -178,7 +178,7 @@
             x-data
             x-on:keydown.escape.window="$wire.closeModal()">
 
-            <section class="my-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            <section class="my-auto flex w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
                 style="max-height: calc(100dvh - 2rem);"
                 role="dialog" aria-modal="true" aria-labelledby="segment-modal-title">
 
@@ -253,6 +253,52 @@
                                 </div>
                             </div>
                         </div>
+
+                        
+                        {{-- EDITOR CARTOGRÁFICO --}}
+                        <div class="border-t border-slate-200 pt-4">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="text-sm font-semibold text-slate-900">
+                                        Editor cartográfico del tramo
+                                    </h3>
+
+                                    <p class="mt-1 text-sm text-slate-500">
+                                        Dibuja el recorrido de la vía haciendo clic en el mapa.
+                                        Puedes cambiar el mapa base y editar la línea.
+                                    </p>
+                                </div>
+
+                                <span class="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                                    WGS84 · EPSG:4326
+                                </span>
+                            </div>
+
+                            <div
+                                id="road-segment-map"
+                                wire:ignore
+                                x-init="window.initMizonaRoadSegmentMap($wire, $el)"
+                                class="mt-4 h-[360px] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100"
+                            ></div>
+
+                            <div class="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+                                <p class="font-semibold text-slate-800">Cómo dibujar el tramo</p>
+
+                                <p class="mt-1">
+                                    1. Selecciona la herramienta para dibujar una línea.
+                                    2. Haz clic en cada vértice del recorrido.
+                                    3. Haz doble clic para finalizar.
+                                    4. Guarda el formulario para conservar los cambios.
+                                </p>
+
+                                <p class="mt-2 text-xs">
+                                    Las coordenadas se completan automáticamente. La geometría
+                                    se guarda como GeoJSON, con las coordenadas en orden
+                                    [longitud, latitud].
+                                </p>
+                            </div>
+                        </div>
+
 
                         {{-- COORDENADAS --}}
                         <div class="border-t border-slate-200 pt-4">
@@ -488,3 +534,653 @@
     @endif
 
 </div>
+
+
+@assets
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    >
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    >
+
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        defer
+    ></script>
+
+    <script
+        src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"
+        defer
+    ></script>
+@endassets
+
+
+@script
+<script>
+    window.initMizonaRoadSegmentMap = function (wire, element) {
+        if (!window.L || !L.Control || !L.Control.Draw) {
+            element.innerHTML =
+                '<div style="padding:16px;color:#b91c1c">' +
+                'No se pudo cargar el mapa. Comprueba tu conexión a Internet.' +
+                '</div>';
+            return;
+        }
+
+        // Evitar inicializar dos veces el mismo elemento.
+        if (element._mizonaLeafletMap) {
+            element._mizonaLeafletMap.remove();
+        }
+
+        const numberOrNull = (value) => {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+
+            const number = Number(value);
+
+            return Number.isFinite(number) ? number : null;
+        };
+
+        // Centro inicial: Santiago. Si hay coordenadas guardadas,
+        // se utilizarán para centrar el mapa.
+        const startLat = numberOrNull(wire.start_latitude);
+        const startLng = numberOrNull(wire.start_longitude);
+
+        const initialCenter =
+            startLat !== null && startLng !== null
+                ? [startLat, startLng]
+                : [-33.45, -70.66];
+
+        const map = L.map(element, {
+            zoomControl: true
+        }).setView(initialCenter, startLat !== null ? 16 : 12);
+
+        element._mizonaLeafletMap = map;
+
+        // Mapas base.
+        const baseLayers = {
+            'Calles — OpenStreetMap': L.tileLayer(
+                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                {
+                    maxZoom: 19,
+                    attribution:
+                        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+                }
+            ),
+
+            'Satélite — Esri': L.tileLayer(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                {
+                    maxZoom: 19,
+                    attribution:
+                        'Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+                }
+            ),
+
+            'Topográfico — OpenTopoMap': L.tileLayer(
+                'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                {
+                    maxZoom: 17,
+                    attribution:
+                        '&copy; OpenStreetMap contributors, SRTM | Map style: OpenTopoMap'
+                }
+            ),
+
+            'Claro — CARTO': L.tileLayer(
+                'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                {
+                    maxZoom: 20,
+                    attribution:
+                        '&copy; OpenStreetMap contributors &copy; CARTO'
+                }
+            ),
+
+            'Oscuro — CARTO': L.tileLayer(
+                'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                {
+                    maxZoom: 20,
+                    attribution:
+                        '&copy; OpenStreetMap contributors &copy; CARTO'
+                }
+            )
+        };
+
+        baseLayers['Calles — OpenStreetMap'].addTo(map);
+
+        L.control.layers(baseLayers, null, {
+            collapsed: true,
+            position: 'topright'
+        }).addTo(map);
+
+        // Grupo obligatorio para editar y eliminar las líneas dibujadas.
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        // Interfaz de dibujo en español.
+        if (L.drawLocal) {
+            L.drawLocal.draw.toolbar.buttons.polyline =
+                'Dibujar tramo de vía';
+
+            L.drawLocal.draw.toolbar.actions.text = 'Cancelar';
+            L.drawLocal.draw.toolbar.actions.title = 'Cancelar dibujo';
+
+            L.drawLocal.draw.toolbar.finish.text = 'Finalizar';
+            L.drawLocal.draw.toolbar.finish.title = 'Finalizar dibujo';
+
+            L.drawLocal.draw.toolbar.undo.text = 'Deshacer último punto';
+            L.drawLocal.draw.toolbar.undo.title = 'Deshacer último punto';
+
+            L.drawLocal.edit.toolbar.buttons.edit = 'Editar tramo';
+            L.drawLocal.edit.toolbar.buttons.remove = 'Eliminar tramo';
+
+            L.drawLocal.edit.toolbar.actions.save.text = 'Guardar';
+            L.drawLocal.edit.toolbar.actions.save.title = 'Guardar cambios';
+
+            L.drawLocal.edit.toolbar.actions.cancel.text = 'Cancelar';
+            L.drawLocal.edit.toolbar.actions.cancel.title = 'Cancelar edición';
+        }
+
+        new L.Control.Draw({
+            position: 'topleft',
+
+            draw: {
+                polyline: {
+                    shapeOptions: {
+                        color: '#2563eb',
+                        weight: 5,
+                        opacity: 0.9
+                    },
+                    allowIntersection: false
+                },
+
+                polygon: false,
+                rectangle: false,
+                circle: false,
+                marker: false,
+                circlemarker: false
+            },
+
+            edit: {
+                featureGroup: drawnItems,
+                edit: true,
+                remove: true
+            }
+        }).addTo(map);
+
+        // Convertir una línea dibujada al GeoJSON que espera Mizona.
+        function syncLayer(layer) {
+            let latlngs = layer.getLatLngs();
+
+            if (!Array.isArray(latlngs)) {
+                return;
+            }
+
+            latlngs = latlngs.flat(Infinity).filter((point) =>
+                point &&
+                typeof point.lat === 'number' &&
+                typeof point.lng === 'number'
+            );
+
+            if (latlngs.length < 2) {
+                return;
+            }
+
+            const coordinates = latlngs.map((point) => [
+                Number(point.lng.toFixed(7)),
+                Number(point.lat.toFixed(7))
+            ]);
+
+            const first = latlngs[0];
+            const last = latlngs[latlngs.length - 1];
+
+            const geometry = {
+                type: 'LineString',
+                coordinates: coordinates
+            };
+
+            // false mantiene las modificaciones locales para enviarlas
+            // junto con el formulario al ejecutar save().
+            wire.set(
+                'geometryJson',
+                JSON.stringify(geometry, null, 2),
+                false
+            );
+
+            wire.set('start_latitude', first.lat.toFixed(7), false);
+            wire.set('start_longitude', first.lng.toFixed(7), false);
+            wire.set('end_latitude', last.lat.toFixed(7), false);
+            wire.set('end_longitude', last.lng.toFixed(7), false);
+        }
+
+        function clearGeometry() {
+            wire.set('geometryJson', '', false);
+            wire.set('start_latitude', '', false);
+            wire.set('start_longitude', '', false);
+            wire.set('end_latitude', '', false);
+            wire.set('end_longitude', '', false);
+        }
+
+        
+        function buildSegmentPopup() {
+            const card = document.createElement('div');
+
+            Object.assign(card.style, {
+                width: '280px',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                border: '1px solid #DCE5EF',
+                borderRadius: '12px',
+                background: '#FFFFFF',
+                color: '#1E293B',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                fontSize: '10px',
+                boxShadow: '0 4px 14px rgba(15, 23, 42, 0.08)'
+            });
+
+            const active = [
+                true, 1, '1', 'true', 'on'
+            ].includes(wire.active);
+
+            const directions = {
+                one_way: 'Sentido único',
+                two_way: 'Doble sentido'
+            };
+
+            function displayValue(value, fallback = 'No registrado') {
+                if (
+                    value === null ||
+                    value === undefined ||
+                    String(value).trim() === ''
+                ) {
+                    return fallback;
+                }
+
+                return String(value);
+            }
+
+            function selectedLabel(id) {
+                const select = document.getElementById(id);
+
+                if (!select || !select.value) {
+                    return 'No seleccionada';
+                }
+
+                return select.selectedOptions?.[0]?.textContent?.trim()
+                    || 'No registrada';
+            }
+
+            function makeText(text, styles = {}) {
+                const element = document.createElement('div');
+
+                element.textContent = text;
+
+                Object.assign(element.style, styles);
+
+                return element;
+            }
+
+            // Encabezado ejecutivo.
+            const header = document.createElement('div');
+
+            Object.assign(header.style, {
+                background: '#142B4A',
+                color: '#FFFFFF',
+                padding: '10px 11px',
+                borderBottom: '3px solid #3B82F6'
+            });
+
+            header.appendChild(makeText('MIZONA · GESTIÓN TERRITORIAL', {
+                fontSize: '9px',
+                fontWeight: '700',
+                letterSpacing: '1.0px',
+                color: '#B9D8FF',
+                marginBottom: '6px'
+            }));
+
+            const titleRow = document.createElement('div');
+
+            Object.assign(titleRow.style, {
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: '8px'
+            });
+
+            const title = makeText(
+                displayValue(wire.segment_name, 'Tramo de vía'),
+                {
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    lineHeight: '1.1',
+                    color: '#FFFFFF',
+                    overflowWrap: 'anywhere',
+                    flex: '1'
+                }
+            );
+
+            const badge = makeText(active ? 'ACTIVO' : 'INACTIVO', {
+                flexShrink: '0',
+                padding: '4px 7px',
+                borderRadius: '20px',
+                fontSize: '9px',
+                fontWeight: '700',
+                letterSpacing: '0.3px',
+                background: active ? '#DCFCE7' : '#E2E8F0',
+                color: active ? '#166534' : '#475569'
+            });
+
+            titleRow.append(title, badge);
+            header.appendChild(titleRow);
+
+            header.appendChild(makeText('Ficha técnica del tramo vial', {
+                marginTop: '3px',
+                fontSize: '11px',
+                color: '#D5E1EF'
+            }));
+
+            card.appendChild(header);
+
+            // Cuerpo de la ficha.
+            const body = document.createElement('div');
+
+            Object.assign(body.style, {
+                padding: '13px 15px'
+            });
+
+            body.appendChild(makeText('INFORMACIÓN GENERAL', {
+                fontSize: '9px',
+                fontWeight: '700',
+                letterSpacing: '0.8px',
+                color: '#64748B',
+                marginBottom: '7px'
+            }));
+
+            function addRow(label, value) {
+                const row = document.createElement('div');
+
+                Object.assign(row.style, {
+                    display: 'grid',
+                    gridTemplateColumns: '94px minmax(0, 1fr)',
+                    gap: '8px',
+                    padding: '7px 0',
+                    borderBottom: '1px solid #EDF2F7',
+                    alignItems: 'start'
+                });
+
+                row.appendChild(makeText(label, {
+                    color: '#64748B',
+                    fontSize: '11px',
+                    lineHeight: '1.5'
+                }));
+
+                row.appendChild(makeText(value, {
+                    color: '#1E293B',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    lineHeight: '1.5',
+                    overflowWrap: 'anywhere'
+                }));
+
+                body.appendChild(row);
+            }
+
+            addRow('Vía', selectedLabel('segment-road'));
+            addRow('Territorio', selectedLabel('segment-location'));
+
+            addRow(
+                'Circulación',
+                directions[wire.direction_type] || 'No definida'
+            );
+
+            addRow(
+                'Válido desde',
+                displayValue(wire.valid_from, 'Sin fecha')
+            );
+
+            addRow(
+                'Válido hasta',
+                displayValue(wire.valid_to, 'Sin vencimiento')
+            );
+
+            // Coordenadas destacadas.
+            const coordinatesBox = document.createElement('div');
+
+            Object.assign(coordinatesBox.style, {
+                marginTop: '12px',
+                padding: '11px',
+                background: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '9px'
+            });
+
+            coordinatesBox.appendChild(makeText('COORDENADAS GEOGRÁFICAS', {
+                fontSize: '9px',
+                fontWeight: '700',
+                letterSpacing: '0.5px',
+                color: '#475569',
+                marginBottom: '9px'
+            }));
+
+            function addCoordinate(label, latitude, longitude, color) {
+                const item = document.createElement('div');
+
+                Object.assign(item.style, {
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    marginTop: '7px'
+                });
+
+                const marker = document.createElement('div');
+
+                Object.assign(marker.style, {
+                    width: '8px',
+                    height: '8px',
+                    minWidth: '8px',
+                    borderRadius: '50%',
+                    background: color,
+                    marginTop: '4px'
+                });
+
+                const details = document.createElement('div');
+
+                details.style.minWidth = '0';
+
+                details.appendChild(makeText(label, {
+                    fontSize: '9px',
+                    color: '#64748B',
+                    marginBottom: '3px',
+                    fontWeight: '600'
+                }));
+
+                details.appendChild(makeText(
+                    `${displayValue(latitude, '—')}, ${displayValue(longitude, '—')}`,
+                    {
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        color: '#0F172A',
+                        fontVariantNumeric: 'tabular-nums',
+                        overflowWrap: 'anywhere',
+                        lineHeight: '1.5'
+                    }
+                ));
+
+                item.append(marker, details);
+                coordinatesBox.appendChild(item);
+            }
+
+            addCoordinate(
+                'PUNTO INICIAL · LAT, LNG',
+                wire.start_latitude,
+                wire.start_longitude,
+                '#16A34A'
+            );
+
+            addCoordinate(
+                'PUNTO FINAL · LAT, LNG',
+                wire.end_latitude,
+                wire.end_longitude,
+                '#DC2626'
+            );
+
+            coordinatesBox.appendChild(makeText(
+                'Sistema de referencia: WGS84 · EPSG:4326',
+                {
+                    marginTop: '10px',
+                    paddingTop: '8px',
+                    borderTop: '1px solid #E2E8F0',
+                    color: '#64748B',
+                    fontSize: '9px'
+                }
+            ));
+
+            body.appendChild(coordinatesBox);
+            card.appendChild(body);
+
+            return card;
+        }
+
+
+        function attachSegmentPopup(layer) {
+            layer.bindPopup(
+                () => buildSegmentPopup(),
+                {
+                    maxWidth: 320,
+                    maxHeight: 290,
+                    autoPan: true,
+                    autoPanPadding: [20, 20],
+                    closeButton: true
+                }
+            );
+        }
+
+        // Al comenzar un nuevo trazado, se conserva un único tramo.
+        map.on(L.Draw.Event.CREATED, function (event) {
+            if (event.layerType !== 'polyline') {
+                return;
+            }
+
+            drawnItems.clearLayers();
+
+            attachSegmentPopup(event.layer);
+
+            drawnItems.addLayer(event.layer);
+            syncLayer(event.layer);
+        });
+
+        // Actualizar las coordenadas tras editar vértices.
+        map.on(L.Draw.Event.EDITED, function (event) {
+            event.layers.eachLayer(function (layer) {
+                syncLayer(layer);
+            });
+        });
+
+        // Si se elimina la línea, se limpian también los campos.
+        map.on(L.Draw.Event.DELETED, function () {
+            if (drawnItems.getLayers().length === 0) {
+                clearGeometry();
+            } else {
+                syncLayer(drawnItems.getLayers()[0]);
+            }
+        });
+
+        // Cargar la geometría existente cuando se edita un tramo.
+        function loadExistingGeometry() {
+            let parsedGeometry = null;
+
+            try {
+                const raw = wire.geometryJson;
+
+                if (raw) {
+                    parsedGeometry =
+                        typeof raw === 'string' ? JSON.parse(raw) : raw;
+                }
+            } catch (error) {
+                console.warn('GeoJSON del tramo no válido:', error);
+            }
+
+            // Aceptar también geometrías GeoJSON Feature o FeatureCollection.
+            if (parsedGeometry?.type === 'Feature') {
+                parsedGeometry = parsedGeometry.geometry;
+            }
+
+            if (parsedGeometry?.type === 'FeatureCollection') {
+                const feature = parsedGeometry.features?.find(
+                    (item) => item.geometry?.type === 'LineString'
+                );
+
+                parsedGeometry = feature?.geometry ?? null;
+            }
+
+            if (
+                parsedGeometry?.type === 'LineString' &&
+                Array.isArray(parsedGeometry.coordinates) &&
+                parsedGeometry.coordinates.length >= 2
+            ) {
+                // GeoJSON usa [longitud, latitud];
+                // Leaflet recibe [latitud, longitud].
+                const latlngs = parsedGeometry.coordinates.map(
+                    ([longitude, latitude]) => [
+                        Number(latitude),
+                        Number(longitude)
+                    ]
+                );
+
+                const line = L.polyline(latlngs, {
+                    color: '#2563eb',
+                    weight: 5,
+                    opacity: 0.9
+                });
+
+                attachSegmentPopup(line);
+                drawnItems.addLayer(line);
+                map.fitBounds(line.getBounds(), {
+                    padding: [25, 25],
+                    maxZoom: 17
+                });
+
+                return;
+            }
+
+            // Compatibilidad con tramos antiguos que tienen extremos
+            // guardados, pero todavía no cuentan con geometría.
+            const endLat = numberOrNull(wire.end_latitude);
+            const endLng = numberOrNull(wire.end_longitude);
+
+            if (
+                startLat !== null &&
+                startLng !== null &&
+                endLat !== null &&
+                endLng !== null
+            ) {
+                const line = L.polyline(
+                    [[startLat, startLng], [endLat, endLng]],
+                    {
+                        color: '#2563eb',
+                        weight: 5,
+                        opacity: 0.9
+                    }
+                );
+
+                attachSegmentPopup(line);    
+                drawnItems.addLayer(line);
+                map.fitBounds(line.getBounds(), {
+                    padding: [25, 25],
+                    maxZoom: 17
+                });
+            }
+        }
+
+        loadExistingGeometry();
+
+        // El modal necesita que el mapa recalcule sus dimensiones.
+        requestAnimationFrame(() => {
+            map.invalidateSize();
+        });
+    };
+</script>
+@endscript

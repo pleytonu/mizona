@@ -97,6 +97,14 @@
                             <span>{{ $segment->location?->name ?? 'Ubicación no disponible' }}</span>
                         </div>
                         <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            @if ($segment->length_meters !== null)
+                                <span class="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-3 py-1.5 font-semibold text-cyan-800">
+                                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <path d="M4 7v10M20 7v10M4 12h16"/>
+                                    </svg>
+                                    {{ number_format((float) $segment->length_meters, 2, ',', '.') }} m
+                                </span>
+                            @endif
                             @if ($segment->active)
                                 <span class="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 font-medium text-green-700">
                                     <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>Activo
@@ -446,6 +454,19 @@
                         <div>
                             <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Ubicación</p>
                             <p class="mt-1 text-sm text-slate-800">{{ $selectedSegment->location?->name ?? 'No disponible' }}</p>
+                        </div>
+                        <div class="rounded-xl border border-cyan-100 bg-cyan-50 p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-cyan-800">Longitud del tramo</p>
+                            @if ($selectedSegment->length_meters !== null)
+                                <p class="mt-1 text-xl font-bold tabular-nums text-slate-900">
+                                    {{ number_format((float) $selectedSegment->length_meters, 2, ',', '.') }} m
+                                </p>
+                                <p class="mt-1 text-xs text-slate-600">
+                                    {{ number_format((float) $selectedSegment->length_meters / 1000, 4, ',', '.') }} km
+                                </p>
+                            @else
+                                <p class="mt-1 text-sm text-slate-500">Pendiente de calcular</p>
+                            @endif
                         </div>
                         <div>
                             <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Tipo de circulación</p>
@@ -802,6 +823,64 @@
                 return String(value);
             }
 
+            // Calcular longitud provisional desde la geometría dibujada.
+            // La longitud definitiva se recalcula y guarda en el modelo Laravel.
+            function getGeometryLengthMeters() {
+                let geometry = null;
+
+                try {
+                    const raw = wire.geometryJson;
+                    geometry = raw
+                        ? (typeof raw === 'string' ? JSON.parse(raw) : raw)
+                        : null;
+                } catch (error) {
+                    return null;
+                }
+
+                if (geometry?.type === 'Feature') {
+                    geometry = geometry.geometry;
+                }
+
+                if (geometry?.type !== 'LineString' || !Array.isArray(geometry.coordinates)) {
+                    return null;
+                }
+
+                const points = geometry.coordinates
+                    .filter((point) => Array.isArray(point) && point.length >= 2)
+                    .map((point) => [Number(point[1]), Number(point[0])])
+                    .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+
+                if (points.length < 2) {
+                    return null;
+                }
+
+                const radius = 6371008.8;
+                const toRadians = (degrees) => degrees * Math.PI / 180;
+                let total = 0;
+
+                for (let i = 1; i < points.length; i++) {
+                    const [lat1, lon1] = points[i - 1].map(toRadians);
+                    const [lat2, lon2] = points[i].map(toRadians);
+                    const dLat = lat2 - lat1;
+                    const dLon = lon2 - lon1;
+                    const a = Math.sin(dLat / 2) ** 2
+                        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+                    total += radius * 2 * Math.atan2(
+                        Math.sqrt(Math.min(1, Math.max(0, a))),
+                        Math.sqrt(1 - Math.min(1, Math.max(0, a)))
+                    );
+                }
+
+                return total;
+            }
+
+            function formatMeters(value) {
+                return new Intl.NumberFormat('es-CL', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }).format(value) + ' m';
+            }
+
             function selectedLabel(id) {
                 const select = document.getElementById(id);
 
@@ -931,6 +1010,22 @@
             addRow('Vía', selectedLabel('segment-road'));
             addRow('Territorio', selectedLabel('segment-location'));
 
+            const geometryLength = getGeometryLengthMeters();
+            addRow(
+                'Longitud',
+                geometryLength === null ? 'Dibuja una línea' : formatMeters(geometryLength)
+            );
+
+            if (geometryLength !== null) {
+                addRow(
+                    'Equivalencia',
+                    new Intl.NumberFormat('es-CL', {
+                        minimumFractionDigits: 4,
+                        maximumFractionDigits: 4
+                    }).format(geometryLength / 1000) + ' km'
+                );
+            }
+
             addRow(
                 'Circulación',
                 directions[wire.direction_type] || 'No definida'
@@ -1050,7 +1145,7 @@
                 () => buildSegmentPopup(),
                 {
                     maxWidth: 320,
-                    maxHeight: 290,
+                    maxHeight: 380,
                     autoPan: true,
                     autoPanPadding: [20, 20],
                     closeButton: true

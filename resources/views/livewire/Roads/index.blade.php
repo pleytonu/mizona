@@ -174,20 +174,52 @@
             x-on:keydown.escape.window="$wire.{{ $showCreateModal ? 'closeCreateModal' : 'closeEditModal' }}()">
 
             <section class="my-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-                style="max-height: calc(100dvh - 2rem);" role="dialog" aria-modal="true">
+                style="max-height: calc(100dvh - 2rem);" role="dialog" aria-modal="true"
+                x-data="{
+                    roadName: @js($current_name ?? ''),
+                    fitLogo() {
+                        const text = this.$refs.roadLogoText;
+                        if (!text) return;
+                        const length = (this.roadName || 'NOMBRE DE VÍA').trim().length;
+                        text.style.fontSize = (length > 25 ? 8 : length > 20 ? 9 : length > 15 ? 10 : length > 11 ? 12 : 14) + 'px';
+                    }
+                }"
+                x-init="fitLogo()">
 
-                <header class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
-                    <div>
-                        <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-blue-700">Gestión territorial</p>
-                        <h2 class="text-xl font-bold text-slate-900">
-                            {{ $showCreateModal ? 'Registrar nueva vía' : 'Editar vía' }}
+                {{-- ENCABEZADO DIVIDIDO: TEXTO A LA IZQUIERDA Y LETRERO A LA DERECHA --}}
+                <header class="relative grid shrink-0 grid-cols-2 items-center gap-3 border-b border-slate-200 px-5 py-4 sm:gap-5 sm:px-6">
+                    <div class="min-w-0 pr-2">
+                        <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-700 sm:text-xs">Gestión territorial</p>
+                        <h2 class="text-lg font-bold leading-tight text-slate-900 sm:text-xl">
+                            {{ $showCreateModal ? 'Nueva vía' : 'Editar vía' }}
                         </h2>
-                        <p class="mt-1 text-sm text-slate-500">Completa la información del registro.</p>
+                        <p class="mt-1 text-xs leading-5 text-slate-500 sm:text-sm">Completa la información del registro.</p>
                     </div>
+
+                    <div class="flex min-w-0 flex-col items-center justify-center gap-1 pr-5 sm:pr-6" aria-live="polite">
+                        <div class="w-1/2 min-w-0 max-w-[220px] flex-none rounded-md bg-black p-1 shadow-sm">
+                            <div class="flex h-10 items-center rounded border border-white px-1">
+                                <div class="flex min-w-0 flex-1 items-center justify-center overflow-hidden px-1">
+                                    <span x-ref="roadLogoText"
+                                        x-text="(roadName || '').trim() || 'NOMBRE DE VÍA'"
+                                        class="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-center font-extrabold uppercase leading-none tracking-tight text-white"
+                                        style="font-size: 14px;"
+                                        title="Vista previa del nombre de la vía"></span>
+                                </div>
+                                <span class="flex h-full w-6 shrink-0 items-center justify-center border-l border-white pl-1" aria-hidden="true">
+                                    <svg class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M13.2 4.8 20.4 12l-7.2 7.2-1.7-1.7 4.3-4.3H3.6v-2.4h12.2l-4.3-4.3z"/>
+                                    </svg>
+                                </span>
+                            </div>
+                        </div>
+                        <p class="text-center text-[10px] leading-tight text-slate-400 sm:text-xs">Vista previa del letrero vial</p>
+                    </div>
+
                     <button type="button"
                         wire:click="{{ $showCreateModal ? 'closeCreateModal' : 'closeEditModal' }}"
                         aria-label="Cerrar"
-                        class="rounded-full p-2 text-slate-500 hover:bg-slate-100">✕</button>
+                        class="absolute right-2 top-2 rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:right-3 sm:top-3">✕</button>
                 </header>
 
                 <form wire:submit="{{ $showCreateModal ? 'save' : 'update' }}"
@@ -199,10 +231,12 @@
                                 Nombre de la vía *
                             </label>
                             <input id="road-name-modal" type="text" wire:model="current_name"
+                                x-on:input="roadName = $event.target.value; fitLogo()"
                                 maxlength="180" required
                                 placeholder="Ej.: Avenida Concha y Toro"
                                 class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-50">
                             @error('current_name') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+
                         </div>
 
                         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -283,16 +317,47 @@
             style="height: 100dvh;" wire:click.self="closeDetailsModal"
             x-data x-on:keydown.escape.window="$wire.closeDetailsModal()">
             <section class="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true">
-                <header class="flex items-start justify-between border-b border-slate-200 px-6 py-5">
-                    <div>
+                <header class="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-200 px-5 py-4 sm:gap-4 sm:px-6">
+                    {{-- Columna izquierda: título y descripción --}}
+                    <div class="min-w-0">
                         <p class="text-xs font-semibold uppercase tracking-wider text-blue-700">Ficha de vía</p>
                         <h2 class="mt-1 text-xl font-bold text-slate-900">Detalles de la vía</h2>
+                        <p class="mt-1 text-sm text-slate-500">Información general del registro.</p>
                     </div>
+
+                    {{-- Columna derecha: vista previa del letrero vial --}}
+                    <div class="min-w-0" x-data="{
+                        fitLogo() {
+                            const text = this.$refs.roadLogoText;
+                            if (!text) return;
+                            const length = text.textContent.trim().length;
+                            text.style.fontSize = (length > 25 ? 8 : length > 20 ? 9 : length > 15 ? 10 : length > 11 ? 12 : 14) + 'px';
+                        }
+                    }" x-init="fitLogo()">
+                        <div class="mx-auto w-full max-w-[190px] rounded-md bg-black p-1 shadow-sm">
+                            <div class="flex h-10 items-center rounded border border-white px-1">
+                                <div class="flex min-w-0 flex-1 items-center justify-center overflow-hidden px-1">
+                                    <span x-ref="roadLogoText"
+                                        class="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-center font-extrabold uppercase leading-none tracking-tight text-white"
+                                        style="font-size: 14px;">{{ $selectedRoad->current_name }}</span>
+                                </div>
+                                <span class="flex h-full w-6 shrink-0 items-center justify-center border-l border-white pl-1" aria-hidden="true">
+                                    <svg class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M13.2 4.8 20.4 12l-7.2 7.2-1.7-1.7 4.3-4.3H3.6v-2.4h12.2l-4.3-4.3z"/>
+                                    </svg>
+                                </span>
+                            </div>
+                        </div>
+                        <p class="mt-1 text-center text-xs text-slate-400">Vista previa del letrero vial</p>
+                    </div>
+
+                    {{-- Botón cerrar --}}
                     <button type="button" wire:click="closeDetailsModal" aria-label="Cerrar"
                         class="rounded-full p-2 text-slate-500 hover:bg-slate-100">✕</button>
                 </header>
 
                 <div class="space-y-5 p-6">
+
                     <div>
                         <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</p>
                         <p class="mt-1 text-lg font-semibold text-slate-900">{{ $selectedRoad->current_name }}</p>
